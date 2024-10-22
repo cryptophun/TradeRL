@@ -1,59 +1,41 @@
-import os
-import zipfile
 import random
 from typing import Dict, Optional
 
 import pandas as pd
 import numpy as np
-from scipy.stats import entropy, differential_entropy
-import talib as ta
 
 import gymnasium as gym
 from gymnasium import spaces
 
 
-class Config:
-    def __init__(self):
-        self.data_dir = 'data'
-        self.file_name = 'BTC_USDT-30m.feather'
-        self.file_path = os.path.join(self.data_dir, self.file_name)
-        self.max_stakes = 5
-        self.initial_balance = 1000
-        self.buy_fee = 0.0005
-        self.sell_fee = 0.0005
-        self.window_size = 144
-        self.render_mode = 'print'
-        self.mode = 'train'
-
 class TradingEnv(gym.Env):
-    def __init__(self, file_path, max_stakes=5, initial_balance=1000, buy_fee=0.0005, sell_fee=0.0005):       
+    def __init__(self, config):       
         super(TradingEnv, self).__init__()
         self.current_step = -1
 
-        # Environment parameters
-        self.timeframe = '30m'
-        self.base_currency = 'BTC'
-        self.quote_currency = 'USDT'
-        self.buy_fee = buy_fee
-        self.sell_fee = sell_fee
+        # Environment configuration
+        self.timeframe = config.timeframe
+        self.base_currency = config.base_currency
+        self.quote_currency = config.quote_currency
+        self.buy_fee = config.buy_fee
+        self.sell_fee = config.sell_fee
 
         # list of indicators to use in observation space
-        self.indicators = ['normalized_close', 'normalized_volume', 'ema5', 'ema13', 'ema21', 'sma50', 'sma100']
-        self.data = load_data(file_path)
+        self.indicators = ['close', 'volume']
+        self.data = load_data(config.file_path)
 
         # Set up environment variables
-        self.max_stakes = max_stakes if max_stakes > 0 else 1
-        self.stakes: Dict[int, Optional[dict]] = {i: None for i in range(0, max_stakes)}
-
-        self.initial_balance = initial_balance
-        self.quote_balance = initial_balance
+        self.max_stakes = config.max_stakes if config.max_stakes > 0 else 1
+        self.stakes: Dict[int, Optional[dict]] = {i: None for i in range(0, config.max_stakes)}
+        self.initial_balance = config.initial_balance
+        self.quote_balance = config.initial_balance
         self.base_balance = 0
         self.base_currency_balance = self.base_balance * self.data['close'].values[self.current_step]
         self.total_balance = self.quote_balance + self.base_currency_balance
         self.balance_fraction = self.quote_balance / self.total_balance
 
-        # Observation space: [closing price, MAs, balance fraction,]
-        num_obs_features = len(self.indicators) + 1 + (self.max_stakes*2)  # indicators + balance + per-stake information
+        # Observation space: [indicators, balance fraction, stake information]
+        num_obs_features = len(self.indicators) + 1 + (self.max_stakes*2)
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(num_obs_features,), dtype=np.float32)
         
         # Action space: [sell/hold decisions for each stake (continuous, thresholded) + buy fraction]
@@ -94,10 +76,10 @@ class TradingEnv(gym.Env):
         reward += 1 if any([x >= 0.5 for x in kwargs['sell_actions']]) else 0
         return reward
 
-    def update_data(self, dataframe):
+    def update_data(self, dataframe: pd.DataFrame):
         self.data = dataframe.copy()
 
-    def seed(self, seed=None):
+    def seed(self, seed:int=42):
         np.random.seed(seed)
         random.seed(seed)
  
@@ -238,6 +220,34 @@ class TradingEnv(gym.Env):
         else:
             pass
 
+
+class Config:
+    def __init__(self,
+                 filepath,
+                 window_size=144,
+                 timeframe='30m',
+                 base_currency='BTC',
+                 quote_currency='USDT',
+                 max_stakes=5,
+                 initial_balance=1000,
+                 buy_fee=0.0005,
+                 sell_fee=0.0005,
+                 render_mode='print',
+                 mode='train'):
+        
+        self.file_name = filepath
+        self.window_size = window_size
+        self.timeframe = timeframe
+        self.base_currency = base_currency
+        self.quote_currency = quote_currency
+        self.max_stakes = max_stakes
+        self.initial_balance = initial_balance
+        self.buy_fee = buy_fee
+        self.sell_fee = sell_fee
+        self.render_mode = render_mode
+        self.mode = mode
+
+        
 def load_data(file_path):
     "Read .feather file and return as DataFrame"
     if file_path.endswith('.feather'):
@@ -248,4 +258,5 @@ def load_data(file_path):
         raise ValueError("Invalid file format. Please provide a .feather file.")
     
 if __name__ == '__main__':
-    env = TradingEnv(data_dir, window_size=144, render_mode='human', mode='train')
+    config = Config('user_data/data/binance/BTC_USDT-30m.feather', window_size=144)
+    env = TradingEnv(config=config)
